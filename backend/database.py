@@ -64,59 +64,81 @@ class KuzuDB:
         """Create node and relationship tables if they don't exist"""
         try:
             # Create File node table
-            self.conn.execute("""
-                CREATE NODE TABLE IF NOT EXISTS File(
-                    id STRING PRIMARY KEY,
-                    path STRING,
-                    language STRING
-                )
-            """)
+            try:
+                self.conn.execute("MATCH (f:File) RETURN f LIMIT 1")
+            except:
+                self.conn.execute("""
+                    CREATE NODE TABLE File(
+                        id STRING,
+                        path STRING,
+                        language STRING,
+                        PRIMARY KEY (id)
+                    )
+                """)
             
             # Create Class node table
-            self.conn.execute("""
-                CREATE NODE TABLE IF NOT EXISTS Class(
-                    id STRING PRIMARY KEY,
-                    name STRING,
-                    start_line INT64,
-                    end_line INT64,
-                    file_path STRING
-                )
-            """)
+            try:
+                self.conn.execute("MATCH (c:Class) RETURN c LIMIT 1")
+            except:
+                self.conn.execute("""
+                    CREATE NODE TABLE Class(
+                        id STRING,
+                        name STRING,
+                        start_line INT64,
+                        end_line INT64,
+                        file_path STRING,
+                        PRIMARY KEY (id)
+                    )
+                """)
             
             # Create Function node table
-            self.conn.execute("""
-                CREATE NODE TABLE IF NOT EXISTS Function(
-                    id STRING PRIMARY KEY,
-                    name STRING,
-                    args STRING,
-                    docstring STRING,
-                    start_line INT64,
-                    end_line INT64,
-                    file_path STRING
-                )
-            """)
+            try:
+                self.conn.execute("MATCH (f:Function) RETURN f LIMIT 1")
+            except:
+                self.conn.execute("""
+                    CREATE NODE TABLE Function(
+                        id STRING,
+                        name STRING,
+                        args STRING,
+                        docstring STRING,
+                        start_line INT64,
+                        end_line INT64,
+                        file_path STRING,
+                        PRIMARY KEY (id)
+                    )
+                """)
             
-            # Create CONTAINS relationship table (File -> Class, File -> Function)
-            self.conn.execute("""
-                CREATE REL TABLE IF NOT EXISTS CONTAINS(
-                    FROM File TO Class,
-                    FROM File TO Function
-                )
-            """)
+            # Create CONTAINS relationship table (File -> Class)
+            try:
+                self.conn.execute("MATCH (f:File)-[r:CONTAINS_CLASS]->(c:Class) RETURN r LIMIT 1")
+            except:
+                self.conn.execute("""
+                    CREATE REL TABLE CONTAINS_CLASS(FROM File TO Class)
+                """)
+            
+            # Create CONTAINS relationship table (File -> Function)
+            try:
+                self.conn.execute("MATCH (f:File)-[r:CONTAINS_FUNCTION]->(fn:Function) RETURN r LIMIT 1")
+            except:
+                self.conn.execute("""
+                    CREATE REL TABLE CONTAINS_FUNCTION(FROM File TO Function)
+                """)
             
             # Create DEFINES relationship table (Class -> Function)
-            self.conn.execute("""
-                CREATE REL TABLE IF NOT EXISTS DEFINES(
-                    FROM Class TO Function
-                )
-            """)
+            try:
+                self.conn.execute("MATCH (c:Class)-[r:DEFINES]->(f:Function) RETURN r LIMIT 1")
+            except:
+                self.conn.execute("""
+                    CREATE REL TABLE DEFINES(FROM Class TO Function)
+                """)
             
             # Create CALLS relationship table (Function -> Function)
-            self.conn.execute("""
-                CREATE REL TABLE IF NOT EXISTS CALLS(
-                    FROM Function TO Function
-                )
-            """)
+            try:
+                self.conn.execute("MATCH (f1:Function)-[r:CALLS]->(f2:Function) RETURN r LIMIT 1")
+            except:
+                self.conn.execute("""
+                    CREATE REL TABLE CALLS(FROM Function TO Function)
+                """)
             
             print("✓ Database schema initialized successfully")
             
@@ -216,23 +238,31 @@ class KuzuDB:
             print(f"Error inserting function node: {e}")
             return False
     
-    def insert_contains(self, source_id: str, target_id: str) -> bool:
+    def insert_contains(self, source_id: str, target_id: str, target_type: str = "Function") -> bool:
         """
         Create a CONTAINS relationship between a File and a Class/Function.
         
         Args:
             source_id: ID of the File node
             target_id: ID of the Class or Function node
+            target_type: Type of target node ("Class" or "Function")
             
         Returns:
             True if successful, False otherwise
         """
         try:
-            self.conn.execute(
-                """MATCH (source:File {id: $source_id}), (target {id: $target_id})
-                   CREATE (source)-[:CONTAINS]->(target)""",
-                {"source_id": source_id, "target_id": target_id}
-            )
+            if target_type == "Class":
+                self.conn.execute(
+                    """MATCH (source:File {id: $source_id}), (target:Class {id: $target_id})
+                       CREATE (source)-[:CONTAINS_CLASS]->(target)""",
+                    {"source_id": source_id, "target_id": target_id}
+                )
+            else:  # Function
+                self.conn.execute(
+                    """MATCH (source:File {id: $source_id}), (target:Function {id: $target_id})
+                       CREATE (source)-[:CONTAINS_FUNCTION]->(target)""",
+                    {"source_id": source_id, "target_id": target_id}
+                )
             return True
         except Exception as e:
             print(f"Error creating CONTAINS relationship: {e}")
@@ -302,7 +332,8 @@ class KuzuDB:
             # Convert result to list of dictionaries
             results = []
             while result.has_next():
-                results.append(result.get_next())
+                row = result.get_next()
+                results.append(row)
             
             return results
         except Exception as e:
@@ -339,22 +370,37 @@ class KuzuDB:
             List of all edges with their properties
         """
         try:
-            # Get all CONTAINS relationships
-            contains = self.execute_cypher(
-                "MATCH (a)-[r:CONTAINS]->(b) RETURN a.id AS source, b.id AS target, 'CONTAINS' AS type"
+            result = []
+            
+            # Get all CONTAINS_CLASS relationships
+            contains_class = self.conn.execute(
+                "MATCH (a:File)-[r:CONTAINS_CLASS]->(b:Class) RETURN a.id AS source, b.id AS target, 'CONTAINS' AS type"
             )
+            while contains_class.has_next():
+                result.append(contains_class.get_next())
+            
+            # Get all CONTAINS_FUNCTION relationships
+            contains_func = self.conn.execute(
+                "MATCH (a:File)-[r:CONTAINS_FUNCTION]->(b:Function) RETURN a.id AS source, b.id AS target, 'CONTAINS' AS type"
+            )
+            while contains_func.has_next():
+                result.append(contains_func.get_next())
             
             # Get all DEFINES relationships
-            defines = self.execute_cypher(
-                "MATCH (a)-[r:DEFINES]->(b) RETURN a.id AS source, b.id AS target, 'DEFINES' AS type"
+            defines = self.conn.execute(
+                "MATCH (a:Class)-[r:DEFINES]->(b:Function) RETURN a.id AS source, b.id AS target, 'DEFINES' AS type"
             )
+            while defines.has_next():
+                result.append(defines.get_next())
             
             # Get all CALLS relationships
-            calls = self.execute_cypher(
-                "MATCH (a)-[r:CALLS]->(b) RETURN a.id AS source, b.id AS target, 'CALLS' AS type"
+            calls = self.conn.execute(
+                "MATCH (a:Function)-[r:CALLS]->(b:Function) RETURN a.id AS source, b.id AS target, 'CALLS' AS type"
             )
+            while calls.has_next():
+                result.append(calls.get_next())
             
-            return contains + defines + calls
+            return result
         except Exception as e:
             print(f"Error retrieving edges: {e}")
             return []
@@ -370,8 +416,7 @@ class KuzuDB:
     
     def close(self):
         """Close the database connection"""
-        if hasattr(self, 'conn'):
-            self.conn.close()
+        # KùzuDB connections don't need explicit closing
         print("✓ Database connection closed")
 
 

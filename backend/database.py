@@ -348,16 +348,37 @@ class KuzuDB:
             List of all nodes with their properties
         """
         try:
+            all_nodes = []
+            
             # Get all File nodes
-            files = self.execute_cypher("MATCH (f:File) RETURN f")
+            files_result = self.conn.execute("MATCH (f:File) RETURN f")
+            while files_result.has_next():
+                row = files_result.get_next()
+                node = row[0] if isinstance(row, (list, tuple)) else row
+                # Convert node to dict with _label
+                node_dict = dict(node) if hasattr(node, '__iter__') and not isinstance(node, str) else {}
+                node_dict['_label'] = 'File'
+                all_nodes.append(node_dict)
             
             # Get all Class nodes
-            classes = self.execute_cypher("MATCH (c:Class) RETURN c")
+            classes_result = self.conn.execute("MATCH (c:Class) RETURN c")
+            while classes_result.has_next():
+                row = classes_result.get_next()
+                node = row[0] if isinstance(row, (list, tuple)) else row
+                node_dict = dict(node) if hasattr(node, '__iter__') and not isinstance(node, str) else {}
+                node_dict['_label'] = 'Class'
+                all_nodes.append(node_dict)
             
             # Get all Function nodes
-            functions = self.execute_cypher("MATCH (fn:Function) RETURN fn")
+            functions_result = self.conn.execute("MATCH (fn:Function) RETURN fn")
+            while functions_result.has_next():
+                row = functions_result.get_next()
+                node = row[0] if isinstance(row, (list, tuple)) else row
+                node_dict = dict(node) if hasattr(node, '__iter__') and not isinstance(node, str) else {}
+                node_dict['_label'] = 'Function'
+                all_nodes.append(node_dict)
             
-            return files + classes + functions
+            return all_nodes
         except Exception as e:
             print(f"Error retrieving nodes: {e}")
             return []
@@ -377,28 +398,53 @@ class KuzuDB:
                 "MATCH (a:File)-[r:CONTAINS_CLASS]->(b:Class) RETURN a.id AS source, b.id AS target, 'CONTAINS' AS type"
             )
             while contains_class.has_next():
-                result.append(contains_class.get_next())
+                row = contains_class.get_next()
+                # Convert to dict
+                edge_dict = {
+                    '_src': row[0] if isinstance(row, (list, tuple)) else row,
+                    '_dst': row[1] if isinstance(row, (list, tuple)) else row,
+                    '_label': row[2] if isinstance(row, (list, tuple)) else 'CONTAINS'
+                }
+                result.append(edge_dict)
             
             # Get all CONTAINS_FUNCTION relationships
             contains_func = self.conn.execute(
                 "MATCH (a:File)-[r:CONTAINS_FUNCTION]->(b:Function) RETURN a.id AS source, b.id AS target, 'CONTAINS' AS type"
             )
             while contains_func.has_next():
-                result.append(contains_func.get_next())
+                row = contains_func.get_next()
+                edge_dict = {
+                    '_src': row[0] if isinstance(row, (list, tuple)) else row,
+                    '_dst': row[1] if isinstance(row, (list, tuple)) else row,
+                    '_label': row[2] if isinstance(row, (list, tuple)) else 'CONTAINS'
+                }
+                result.append(edge_dict)
             
             # Get all DEFINES relationships
             defines = self.conn.execute(
                 "MATCH (a:Class)-[r:DEFINES]->(b:Function) RETURN a.id AS source, b.id AS target, 'DEFINES' AS type"
             )
             while defines.has_next():
-                result.append(defines.get_next())
+                row = defines.get_next()
+                edge_dict = {
+                    '_src': row[0] if isinstance(row, (list, tuple)) else row,
+                    '_dst': row[1] if isinstance(row, (list, tuple)) else row,
+                    '_label': row[2] if isinstance(row, (list, tuple)) else 'DEFINES'
+                }
+                result.append(edge_dict)
             
             # Get all CALLS relationships
             calls = self.conn.execute(
                 "MATCH (a:Function)-[r:CALLS]->(b:Function) RETURN a.id AS source, b.id AS target, 'CALLS' AS type"
             )
             while calls.has_next():
-                result.append(calls.get_next())
+                row = calls.get_next()
+                edge_dict = {
+                    '_src': row[0] if isinstance(row, (list, tuple)) else row,
+                    '_dst': row[1] if isinstance(row, (list, tuple)) else row,
+                    '_label': row[2] if isinstance(row, (list, tuple)) else 'CALLS'
+                }
+                result.append(edge_dict)
             
             return result
         except Exception as e:
